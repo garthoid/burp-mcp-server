@@ -1,6 +1,7 @@
 package net.portswigger.mcp.schema
 
 import burp.api.montoya.collaborator.Interaction as CollaboratorInteraction
+import burp.api.montoya.http.message.HttpRequestResponse as SiteMapRequestResponse
 import burp.api.montoya.organizer.OrganizerItem
 import burp.api.montoya.proxy.ProxyHttpRequestResponse
 import burp.api.montoya.proxy.ProxyWebSocketMessage

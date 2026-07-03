@@ -377,6 +377,36 @@ fun Server.registerTools(api: MontoyaApi, config: McpConfig) {
             .map { truncateIfNeeded(Json.encodeToString(it.toSerializableForm())) }
     }
 
+    mcpPaginatedTool<GetSiteMapRequests>("Displays all requests and responses in the site map (discovered by crawler, scanner, or manual browsing)") {
+        val allowed = runBlocking {
+            checkDataAccessOrDeny(DataAccessType.SITE_MAP, config, api, "Site map")
+        }
+        if (!allowed) {
+            return@mcpPaginatedTool sequenceOf("Site map access denied by Burp Suite")
+        }
+
+        api.siteMap().requestResponses().asSequence()
+            .map { truncateIfNeeded(Json.encodeToString(it.toSerializableForm())) }
+    }
+
+    mcpPaginatedTool<GetSiteMapRequestsRegex>("Displays items matching a specified regex within the site map") {
+        val allowed = runBlocking {
+            checkDataAccessOrDeny(DataAccessType.SITE_MAP, config, api, "Site map")
+        }
+        if (!allowed) {
+            return@mcpPaginatedTool sequenceOf("Site map access denied by Burp Suite")
+        }
+
+        val compiledRegex = Pattern.compile(regex)
+        api.siteMap().requestResponses().asSequence()
+            .filter {
+                val requestStr = it.request()?.toString() ?: ""
+                val responseStr = it.response()?.toString() ?: ""
+                compiledRegex.matcher(requestStr + responseStr).find()
+            }
+            .map { truncateIfNeeded(Json.encodeToString(it.toSerializableForm())) }
+    }
+
     mcpTool<SetTaskExecutionEngineState>("Sets the state of Burp's task execution engine (paused or unpaused)") {
         api.burpSuite().taskExecutionEngine().state = if (running) RUNNING else PAUSED
 
@@ -531,6 +561,12 @@ data class GetProxyWebsocketHistory(override val count: Int, override val offset
 @Serializable
 data class GetProxyWebsocketHistoryRegex(val regex: String, override val count: Int, override val offset: Int) :
     Paginated
+
+@Serializable
+data class GetSiteMapRequests(override val count: Int, override val offset: Int) : Paginated
+
+@Serializable
+data class GetSiteMapRequestsRegex(val regex: String, override val count: Int, override val offset: Int) : Paginated
 
 @Serializable
 data class GenerateCollaboratorPayload(
