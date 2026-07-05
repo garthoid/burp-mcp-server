@@ -1081,6 +1081,87 @@ class ToolsKtTest {
                 result.expectTextContent("No interactions detected")
             }
         }
+
+        @Test
+        fun `start crawl should start a crawl with seed urls`() {
+            val scanner = mockk<burp.api.montoya.scanner.Scanner>()
+            val crawlConfig = mockk<burp.api.montoya.scanner.CrawlConfiguration>()
+            val crawl = mockk<burp.api.montoya.scanner.Crawl>()
+            val seedsSlot = slot<kotlin.Array<String>>()
+
+            mockkStatic(burp.api.montoya.scanner.CrawlConfiguration::class)
+            every { burp.api.montoya.scanner.CrawlConfiguration.crawlConfiguration(*varargAll { true }) } answers {
+                seedsSlot.captured = invocation.args[0] as kotlin.Array<String>
+                crawlConfig
+            }
+            every { api.scanner() } returns scanner
+            every { scanner.startCrawl(crawlConfig) } returns crawl
+
+            runBlocking {
+                val result = client.callTool(
+                    "start_crawl", mapOf(
+                        "seedUrls" to Json.encodeToJsonElement(listOf("https://example.com/", "https://example.com/app"))
+                    )
+                )
+
+                delay(100)
+                val text = result.expectTextContent()
+                assertTrue(text.contains("Crawl started"))
+                assertTrue(text.contains("https://example.com/"))
+            }
+
+            verify(exactly = 1) { scanner.startCrawl(crawlConfig) }
+            assertArrayEquals(arrayOf("https://example.com/", "https://example.com/app"), seedsSlot.captured)
+
+            unmockkStatic(burp.api.montoya.scanner.CrawlConfiguration::class)
+        }
+
+        @Test
+        fun `start crawl should reject empty seed urls`() {
+            val scanner = mockk<burp.api.montoya.scanner.Scanner>(relaxed = true)
+            every { api.scanner() } returns scanner
+
+            runBlocking {
+                val result = client.callTool(
+                    "start_crawl", mapOf(
+                        "seedUrls" to Json.encodeToJsonElement(emptyList<String>())
+                    )
+                )
+
+                delay(100)
+                result.expectTextContent("No seed URLs provided")
+            }
+
+            verify(exactly = 0) { scanner.startCrawl(any()) }
+        }
+
+        @Test
+        fun `start audit should start an audit for the url`() {
+            val scanner = mockk<burp.api.montoya.scanner.Scanner>()
+            val auditConfig = mockk<burp.api.montoya.scanner.AuditConfiguration>()
+            val audit = mockk<burp.api.montoya.scanner.audit.Audit>(relaxed = true)
+            val request = mockk<HttpRequest>()
+
+            mockkStatic(burp.api.montoya.scanner.AuditConfiguration::class)
+            every { burp.api.montoya.scanner.AuditConfiguration.auditConfiguration(any()) } returns auditConfig
+            every { HttpRequest.httpRequestFromUrl("https://example.com/") } returns request
+            every { api.scanner() } returns scanner
+            every { scanner.startAudit(auditConfig) } returns audit
+
+            runBlocking {
+                val result = client.callTool(
+                    "start_audit", mapOf("url" to "https://example.com/")
+                )
+
+                delay(100)
+                result.expectTextContent("Active audit started for: https://example.com/")
+            }
+
+            verify(exactly = 1) { scanner.startAudit(auditConfig) }
+            verify(exactly = 1) { audit.addRequest(request) }
+
+            unmockkStatic(burp.api.montoya.scanner.AuditConfiguration::class)
+        }
     }
 
     @Test
@@ -1104,6 +1185,8 @@ class ToolsKtTest {
             assertFalse(tools.any { it.name == "get_scanner_issues" })
             assertFalse(tools.any { it.name == "generate_collaborator_payload" })
             assertFalse(tools.any { it.name == "get_collaborator_interactions" })
+            assertFalse(tools.any { it.name == "start_crawl" })
+            assertFalse(tools.any { it.name == "start_audit" })
         }
 
         every { version.edition() } returns BurpSuiteEdition.PROFESSIONAL
@@ -1128,6 +1211,8 @@ class ToolsKtTest {
             assertTrue(tools.any { it.name == "get_scanner_issues" })
             assertTrue(tools.any { it.name == "generate_collaborator_payload" })
             assertTrue(tools.any { it.name == "get_collaborator_interactions" })
+            assertTrue(tools.any { it.name == "start_crawl" })
+            assertTrue(tools.any { it.name == "start_audit" })
         }
     }
 }

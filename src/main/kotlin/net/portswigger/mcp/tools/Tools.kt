@@ -9,6 +9,9 @@ import burp.api.montoya.http.HttpMode
 import burp.api.montoya.http.HttpService
 import burp.api.montoya.http.message.HttpHeader
 import burp.api.montoya.http.message.requests.HttpRequest
+import burp.api.montoya.scanner.AuditConfiguration
+import burp.api.montoya.scanner.BuiltInAuditConfiguration
+import burp.api.montoya.scanner.CrawlConfiguration
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
@@ -260,6 +263,37 @@ fun Server.registerTools(api: MontoyaApi, config: McpConfig) {
     if (api.burpSuite().version().edition() == BurpSuiteEdition.PROFESSIONAL) {
         mcpPaginatedTool<GetScannerIssues>("Displays information about issues identified by the scanner") {
             api.siteMap().issues().asSequence().map { Json.encodeToString(it.toSerializableForm()) }
+        }
+
+        mcpTool<StartCrawl>(
+            "Starts a Burp crawl (spider) from one or more seed URLs to discover content. " +
+            "Discovered items appear in the site map. Requires Burp Suite Professional."
+        ) {
+            if (seedUrls.isEmpty()) {
+                return@mcpTool "No seed URLs provided"
+            }
+
+            api.logging().logToOutput("MCP starting crawl for: ${seedUrls.joinToString(", ")}")
+
+            val crawlConfiguration = CrawlConfiguration.crawlConfiguration(*seedUrls.toTypedArray())
+            api.scanner().startCrawl(crawlConfiguration)
+
+            "Crawl started with ${seedUrls.size} seed URL(s): ${seedUrls.joinToString(", ")}"
+        }
+
+        mcpTool<StartAudit>(
+            "Starts a Burp active audit (vulnerability scan) of the given URL. " +
+            "Findings appear in the scanner issues and can be read with get_scanner_issues. " +
+            "Requires Burp Suite Professional."
+        ) {
+            api.logging().logToOutput("MCP starting audit for: $url")
+
+            val auditConfiguration =
+                AuditConfiguration.auditConfiguration(BuiltInAuditConfiguration.LEGACY_ACTIVE_AUDIT_CHECKS)
+            val audit = api.scanner().startAudit(auditConfiguration)
+            audit.addRequest(HttpRequest.httpRequestFromUrl(url))
+
+            "Active audit started for: $url"
         }
 
         val collaboratorClient by lazy { api.collaborator().createClient() }
@@ -568,6 +602,12 @@ data class SetActiveEditorContents(val text: String)
 
 @Serializable
 data class GetScannerIssues(override val count: Int, override val offset: Int) : Paginated
+
+@Serializable
+data class StartCrawl(val seedUrls: List<String>)
+
+@Serializable
+data class StartAudit(val url: String)
 
 @Serializable
 data class GetProxyHttpHistory(override val count: Int, override val offset: Int) : Paginated
