@@ -638,6 +638,63 @@ class ToolsKtTest {
     }
 
     @Nested
+    inner class ScopeToolsTests {
+        @Test
+        fun `add to scope should include url`() {
+            val scope = mockk<burp.api.montoya.scope.Scope>()
+            every { api.scope() } returns scope
+            every { scope.includeInScope(any()) } just runs
+
+            runBlocking {
+                val result = client.callTool(
+                    "add_to_scope", mapOf("url" to "https://example.com/")
+                )
+
+                delay(100)
+                result.expectTextContent("Added to scope: https://example.com/")
+            }
+
+            verify(exactly = 1) { scope.includeInScope("https://example.com/") }
+        }
+
+        @Test
+        fun `remove from scope should exclude url`() {
+            val scope = mockk<burp.api.montoya.scope.Scope>()
+            every { api.scope() } returns scope
+            every { scope.excludeFromScope(any()) } just runs
+
+            runBlocking {
+                val result = client.callTool(
+                    "remove_from_scope", mapOf("url" to "https://example.com/")
+                )
+
+                delay(100)
+                result.expectTextContent("Removed from scope: https://example.com/")
+            }
+
+            verify(exactly = 1) { scope.excludeFromScope("https://example.com/") }
+        }
+
+        @Test
+        fun `is in scope should report membership`() {
+            val scope = mockk<burp.api.montoya.scope.Scope>()
+            every { api.scope() } returns scope
+            every { scope.isInScope("https://example.com/") } returns true
+            every { scope.isInScope("https://other.com/") } returns false
+
+            runBlocking {
+                val inResult = client.callTool("is_in_scope", mapOf("url" to "https://example.com/"))
+                delay(100)
+                inResult.expectTextContent("In scope: https://example.com/")
+
+                val outResult = client.callTool("is_in_scope", mapOf("url" to "https://other.com/"))
+                delay(100)
+                outResult.expectTextContent("Not in scope: https://other.com/")
+            }
+        }
+    }
+
+    @Nested
     inner class EditorTests {
         @Test
         fun `get active editor contents should handle no editor`() {

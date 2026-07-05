@@ -413,6 +413,23 @@ fun Server.registerTools(api: MontoyaApi, config: McpConfig) {
         "Task execution engine is now ${if (running) "running" else "paused"}"
     }
 
+    mcpTool<AddToScope>("Adds a URL to Burp's target scope. Accepts a full URL, or a prefix to include everything beneath it.") {
+        api.scope().includeInScope(url)
+        api.logging().logToOutput("MCP added to scope: $url")
+        "Added to scope: $url"
+    }
+
+    mcpTool<RemoveFromScope>("Removes a URL from Burp's target scope.") {
+        api.scope().excludeFromScope(url)
+        api.logging().logToOutput("MCP removed from scope: $url")
+        "Removed from scope: $url"
+    }
+
+    mcpTool<IsInScope>("Checks whether a URL is within Burp's current target scope.") {
+        val inScope = api.scope().isInScope(url)
+        if (inScope) "In scope: $url" else "Not in scope: $url"
+    }
+
     mcpTool<SetProxyInterceptState>("Enables or disables Burp Proxy Intercept") {
         if (intercepting) {
             api.proxy().enableIntercept()
@@ -536,6 +553,15 @@ data class SetTaskExecutionEngineState(val running: Boolean)
 
 @Serializable
 data class SetProxyInterceptState(val intercepting: Boolean)
+
+@Serializable
+data class AddToScope(val url: String)
+
+@Serializable
+data class RemoveFromScope(val url: String)
+
+@Serializable
+data class IsInScope(val url: String)
 
 @Serializable
 data class SetActiveEditorContents(val text: String)
