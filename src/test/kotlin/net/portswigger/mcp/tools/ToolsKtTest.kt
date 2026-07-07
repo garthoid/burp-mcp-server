@@ -695,6 +695,128 @@ class ToolsKtTest {
     }
 
     @Nested
+    inner class WebSocketToolsTests {
+        @Test
+        fun `create websocket should register connection and return id`() {
+            val webSockets = mockk<burp.api.montoya.websocket.WebSockets>()
+            val creation = mockk<burp.api.montoya.websocket.extension.ExtensionWebSocketCreation>()
+            val extensionWebSocket = mockk<burp.api.montoya.websocket.extension.ExtensionWebSocket>(relaxed = true)
+
+            every { api.websockets() } returns webSockets
+            every { webSockets.createWebSocket(any(), any<String>()) } returns creation
+            every { creation.webSocket() } returns Optional.of(extensionWebSocket)
+
+            runBlocking {
+                val result = client.callTool(
+                    "create_websocket", mapOf(
+                        "content" to "GET /chat HTTP/1.1\r\nHost: example.com\r\nUpgrade: websocket\r\n\r\n",
+                        "targetHostname" to "example.com",
+                        "targetPort" to 443,
+                        "usesHttps" to true
+                    )
+                )
+
+                delay(100)
+                val text = result.expectTextContent()
+                assertTrue(text.startsWith("WebSocket connected. id: ws-"), "Got: $text")
+            }
+
+            verify(exactly = 1) { extensionWebSocket.registerMessageHandler(any()) }
+        }
+
+        @Test
+        fun `create websocket should report failure status`() {
+            val webSockets = mockk<burp.api.montoya.websocket.WebSockets>()
+            val creation = mockk<burp.api.montoya.websocket.extension.ExtensionWebSocketCreation>()
+
+            every { api.websockets() } returns webSockets
+            every { webSockets.createWebSocket(any(), any<String>()) } returns creation
+            every { creation.webSocket() } returns Optional.empty()
+            every { creation.status() } returns
+                burp.api.montoya.websocket.extension.ExtensionWebSocketCreationStatus.CONNECTION_FAILED
+
+            runBlocking {
+                val result = client.callTool(
+                    "create_websocket", mapOf(
+                        "content" to "GET /chat HTTP/1.1\r\nHost: example.com\r\n\r\n",
+                        "targetHostname" to "example.com",
+                        "targetPort" to 443,
+                        "usesHttps" to true
+                    )
+                )
+
+                delay(100)
+                result.expectTextContent("WebSocket connection failed: CONNECTION_FAILED")
+            }
+        }
+
+        @Test
+        fun `send and drain messages should round-trip through an open websocket`() {
+            val webSockets = mockk<burp.api.montoya.websocket.WebSockets>()
+            val creation = mockk<burp.api.montoya.websocket.extension.ExtensionWebSocketCreation>()
+            val extensionWebSocket = mockk<burp.api.montoya.websocket.extension.ExtensionWebSocket>(relaxed = true)
+
+            every { api.websockets() } returns webSockets
+            every { webSockets.createWebSocket(any(), any<String>()) } returns creation
+            every { creation.webSocket() } returns Optional.of(extensionWebSocket)
+
+            runBlocking {
+                val created = client.callTool(
+                    "create_websocket", mapOf(
+                        "content" to "GET /chat HTTP/1.1\r\nHost: example.com\r\nUpgrade: websocket\r\n\r\n",
+                        "targetHostname" to "example.com",
+                        "targetPort" to 443,
+                        "usesHttps" to true
+                    )
+                )
+                delay(100)
+                val id = created.expectTextContent().substringAfter("id: ").trim()
+
+                val sent = client.callTool(
+                    "send_websocket_message", mapOf("webSocketId" to id, "message" to "hello")
+                )
+                delay(100)
+                sent.expectTextContent("Message sent on $id")
+
+                val drained = client.callTool("get_websocket_messages", mapOf("webSocketId" to id))
+                delay(100)
+                val text = drained.expectTextContent()
+                assertTrue(text.contains("[CLIENT_TO_SERVER text] hello"), "Got: $text")
+
+                val drainedAgain = client.callTool("get_websocket_messages", mapOf("webSocketId" to id))
+                delay(100)
+                assertTrue(drainedAgain.expectTextContent().startsWith("No new messages"))
+
+                val closed = client.callTool("close_websocket", mapOf("webSocketId" to id))
+                delay(100)
+                closed.expectTextContent("WebSocket closed: $id")
+            }
+
+            verify(exactly = 1) { extensionWebSocket.sendTextMessage("hello") }
+            verify(exactly = 1) { extensionWebSocket.close() }
+        }
+
+        @Test
+        fun `websocket tools should reject unknown id`() {
+            runBlocking {
+                val send = client.callTool(
+                    "send_websocket_message", mapOf("webSocketId" to "ws-nope", "message" to "x")
+                )
+                delay(100)
+                send.expectTextContent("Unknown WebSocket id: ws-nope")
+
+                val get = client.callTool("get_websocket_messages", mapOf("webSocketId" to "ws-nope"))
+                delay(100)
+                get.expectTextContent("Unknown WebSocket id: ws-nope")
+
+                val close = client.callTool("close_websocket", mapOf("webSocketId" to "ws-nope"))
+                delay(100)
+                close.expectTextContent("Unknown WebSocket id: ws-nope")
+            }
+        }
+    }
+
+    @Nested
     inner class EditorTests {
         @Test
         fun `get active editor contents should handle no editor`() {
