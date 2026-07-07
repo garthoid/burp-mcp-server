@@ -474,6 +474,67 @@ fun Server.registerTools(api: MontoyaApi, config: McpConfig) {
         "Intercept has been ${if (intercepting) "enabled" else "disabled"}"
     }
 
+    mcpTool<CreateWebsocket>(
+        "Opens a WebSocket connection through Burp by sending the given HTTP upgrade request. " +
+        "Provide the raw upgrade request (including 'Upgrade: websocket' and 'Sec-WebSocket-*' headers). " +
+        "On success returns a WebSocket id used by send_websocket_message, get_websocket_messages and close_websocket."
+    ) {
+        val allowed = runBlocking {
+            HttpRequestSecurity.checkHttpRequestPermission(targetHostname, targetPort, config, content, api)
+        }
+        if (!allowed) {
+            api.logging().logToOutput("MCP WebSocket connection denied: $targetHostname:$targetPort")
+            return@mcpTool "WebSocket connection denied by Burp Suite"
+        }
+
+        val fixedContent = normalizeHttpContent(content)
+        val creation = api.websockets().createWebSocket(toMontoyaService(), fixedContent)
+        val webSocket = creation.webSocket().orElse(null)
+
+        if (webSocket == null) {
+            api.logging().logToOutput("MCP WebSocket connection failed (${creation.status()}): $targetHostname:$targetPort")
+            "WebSocket connection failed: ${creation.status()}"
+        } else {
+            val id = WebSocketRegistry.register(webSocket)
+            api.logging().logToOutput("MCP WebSocket connected ($id): $targetHostname:$targetPort")
+            "WebSocket connected. id: $id"
+        }
+    }
+
+    mcpTool<SendWebsocketMessage>("Sends a text message over a WebSocket previously opened with create_websocket.") {
+        if (!WebSocketRegistry.sendText(webSocketId, message)) {
+            return@mcpTool "Unknown WebSocket id: $webSocketId"
+        }
+        "Message sent on $webSocketId"
+    }
+
+    mcpTool<GetWebsocketMessages>(
+        "Retrieves and clears buffered messages for a WebSocket opened with create_websocket. " +
+        "Includes messages received from the server and messages you sent."
+    ) {
+        val messages = WebSocketRegistry.drainMessages(webSocketId)
+            ?: return@mcpTool "Unknown WebSocket id: $webSocketId"
+
+        val closedNote = if (WebSocketRegistry.isClosed(webSocketId)) " (connection closed)" else ""
+        if (messages.isEmpty()) {
+            "No new messages for $webSocketId$closedNote"
+        } else {
+            messages.joinToString("\n\n") { "[${it.direction} ${it.type}] ${it.payload}" } + closedNote
+        }
+    }
+
+    mcpTool<CloseWebsocket>("Closes a WebSocket previously opened with create_websocket.") {
+        if (!WebSocketRegistry.close(webSocketId)) {
+            return@mcpTool "Unknown WebSocket id: $webSocketId"
+        }
+        "WebSocket closed: $webSocketId"
+    }
+
+    mcpTool("list_websockets", "Lists the ids of WebSocket connections currently open via create_websocket") {
+        val ids = WebSocketRegistry.openIds()
+        if (ids.isEmpty()) "No open WebSocket connections" else ids.joinToString("\n")
+    }
+
     mcpTool("get_active_editor_contents", "Outputs the contents of the user's active message editor") {
         getActiveEditor(api)?.text ?: "<No active editor>"
     }
@@ -521,6 +582,23 @@ data class SendHttp1Request(
     override val targetPort: Int,
     override val usesHttps: Boolean
 ) : HttpServiceParams
+
+@Serializable
+data class CreateWebsocket(
+    val content: String,
+    override val targetHostname: String,
+    override val targetPort: Int,
+    override val usesHttps: Boolean
+) : HttpServiceParams
+
+@Serializable
+data class SendWebsocketMessage(val webSocketId: String, val message: String)
+
+@Serializable
+data class GetWebsocketMessages(val webSocketId: String)
+
+@Serializable
+data class CloseWebsocket(val webSocketId: String)
 
 @Serializable
 data class SendHttp2Request(
